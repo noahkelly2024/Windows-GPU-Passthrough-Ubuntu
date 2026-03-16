@@ -1,5 +1,5 @@
 # Windows-GPU-Passthrough-Ubuntu
-GPU-accelerated Windows VM on Ubuntu using KVM/QEMU with Looking Glass (ultra-low-latency display).
+GPU-accelerated Windows VM on Ubuntu using KVM/QEMU with Looking Glass (near-zero-latency display).
 
 
 ## Requirements

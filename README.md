@@ -9,7 +9,7 @@ GPU-accelerated Windows VM on Ubuntu using KVM/QEMU with Looking Glass (near-zer
 - Two GPUs: one for the host display, one to pass through to Windows
   - e.g. Intel iGPU (host) + AMD/NVIDIA dGPU (Windows)
 - A monitor connected to your **motherboard** (iGPU), not your dedicated GPU
-- At least 16 GB RAM and 100 GB free disk space recommended
+- At least 12 GB RAM and 100 GB free disk space recommended
 
 **BIOS Settings (required before starting):**
 

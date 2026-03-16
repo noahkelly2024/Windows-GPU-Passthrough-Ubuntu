@@ -1,0 +1,51 @@
+#!/bin/bash
+
+set -e
+
+COMMAND="$1"
+DESCRIPTION="${2:-}"  # Optional custom description
+OMARCHY_PATH=${OMARCHY_PATH:-$HOME/.local/share/ubuntu}
+
+if [[ -z $COMMAND ]]; then
+  echo "Usage: ubuntu-snapshot <create|restore> [description]" >&2
+  echo "" >&2
+  echo "Examples:" >&2
+  echo "  ubuntu-snapshot create                    # Uses ubuntu version as description" >&2
+  echo "  ubuntu-snapshot create \"GPU Passthrough\"  # Custom description" >&2
+  exit 1
+fi
+
+if ! command -v snapper &>/dev/null; then
+  exit 127 # ubuntu-update can use this to just ignore if snapper is not available
+fi
+
+case "$COMMAND" in
+create)
+  # Use custom description if provided, otherwise use ubuntu version
+  if [[ -n "$DESCRIPTION" ]]; then
+    DESC="$DESCRIPTION"
+  else
+    DESC="$(ubuntu-version)"
+  fi
+
+  echo -e "\e[32mCreate system snapshot\e[0m"
+
+  # Get existing snapper config names from CSV output
+  mapfile -t CONFIGS < <(sudo snapper --csvout list-configs | awk -F, 'NR>1 {print $1}')
+
+  for config in "${CONFIGS[@]}"; do
+    sudo snapper -c "$config" create -c number -d "$DESC"
+  done
+  echo
+  ;;
+restore)
+  if command -v limine-snapper-restore &>/dev/null; then
+    sudo limine-snapper-restore
+  else
+    echo "To restore a snapshot on this system:" >&2
+    echo "  1. List snapshots:  sudo snapper list" >&2
+    echo "  2. Rollback:        sudo snapper rollback <number>" >&2
+    echo "  3. Reboot, then run: sudo update-grub" >&2
+  fi
+  ;;
+esac

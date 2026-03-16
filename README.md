@@ -27,7 +27,7 @@ GPU-accelerated Windows VM on Ubuntu using KVM/QEMU with Looking Glass (ultra-lo
 
 ```bash
 cd ~/Downloads
-git clone https://github.com/your-repo/ubuntu-vm-scripts   # or copy the folder
+git clone https://github.com/noahkelly2024/Windows-GPU-Passthrough-Ubuntu.git   # or copy the folder
 cd ubuntu-vm-scripts
 ./ubuntu-windows-vm system-install
 ```

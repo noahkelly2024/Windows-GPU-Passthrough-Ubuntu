@@ -2,9 +2,6 @@
 GPU-accelerated Windows VM on Ubuntu using KVM/QEMU with Looking Glass (ultra-low-latency display).
 
 
-
-# Windows VM Quick Install Guide
-
 ## Requirements
 
 **Hardware:**

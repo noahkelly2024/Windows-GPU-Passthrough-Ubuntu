@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Windows [Looking Glass]
+Comment=Connect to Windows VM via Looking Glass
+Exec=uwsm-app -- omarchy-windows-vm launch --lg --keep-alive --windowed
+Icon=/home/noahk/.local/share/applications/icons/windows.png
+Terminal=false
+Type=Application
+Categories=System;Virtualization;

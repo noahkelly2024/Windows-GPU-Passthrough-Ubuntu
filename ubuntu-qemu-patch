@@ -1,0 +1,165 @@
+#!/bin/bash
+# ubuntu-qemu-patch - Build and inject qemu-anti-detection patched QEMU into dockurr/windows
+#
+# The qemu-anti-detection patch replaces compile-time string literals in QEMU:
+#   "QEMU HARDDISK" → real disk model name
+#   "QEMU DVD-ROM"  → "ASUS DRW-24B1ST"
+#   "QEMU"          → vendor names for keyboard/mouse/USB devices
+# These strings cannot be changed via QEMU arguments — only source-level patching works.
+#
+# This script builds the patched QEMU *inside* a container matching dockurr/windows,
+# then creates a new Docker layer replacing the QEMU binary. The build takes 20-40 min.
+
+QEMU_VERSION="8.2.2"
+PATCH_REPO="https://github.com/zhaodice/qemu-anti-detection.git"
+QEMU_URL="https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz"
+IMAGE="dockurr/windows:latest"
+BUILD_CONTAINER="qemu-anti-detection-build"
+OUTPUT_DIR="/tmp/qemu-anti-detection-output-$$"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/ubuntu-gpu-passthrough-utils" ]]; then
+  source "$SCRIPT_DIR/ubuntu-gpu-passthrough-utils"
+else
+  msg_error()   { echo "❌  Error: $*" >&2; }
+  msg_warning() { echo "⚠️  Warning: $*" >&2; }
+  msg_success() { echo "✓  $*"; }
+  msg_info()    { echo "ℹ️  $*"; }
+fi
+
+# ── checks ────────────────────────────────────────────────────────────────────
+
+if ! command -v docker &>/dev/null; then
+  msg_error "Docker not found. Run: windows-vm install first"
+  exit 1
+fi
+
+if ! docker image inspect "$IMAGE" &>/dev/null; then
+  msg_error "Docker image $IMAGE not found. Run: windows-vm install first"
+  exit 1
+fi
+
+# Check if already patched
+if docker history --no-trunc "$IMAGE" 2>/dev/null | grep -q 'qemu-anti-detection'; then
+  msg_success "QEMU anti-detection patch already applied"
+  echo "  To force rebuild: docker rmi $IMAGE && windows-vm install && ubuntu-qemu-patch"
+  exit 0
+fi
+
+echo "QEMU Anti-Detection Patch"
+echo "Replaces QEMU device strings with real hardware names at compile time."
+echo "This cannot be done via ARGUMENTS — source-level patching is required."
+echo ""
+echo "Build time: 20-40 minutes"
+echo "QEMU version: $QEMU_VERSION"
+echo ""
+read -rp "Continue? [y/N] " confirm
+[[ "$confirm" =~ ^[Yy]$ ]] || { echo "Cancelled"; exit 0; }
+
+# ── build patched QEMU inside a container matching dockurr/windows ────────────
+
+mkdir -p "$OUTPUT_DIR"
+trap 'rm -rf "$OUTPUT_DIR"; docker rm -f "$BUILD_CONTAINER" 2>/dev/null || true' EXIT
+
+msg_info "Installing build dependencies inside container..."
+
+# Run the full build inside a container that matches the image's Ubuntu base.
+# We need libspice-server-dev for SPICE support in the patched binary.
+docker run --name "$BUILD_CONTAINER" --rm \
+  -v "$OUTPUT_DIR:/output" \
+  --entrypoint /bin/bash \
+  "$IMAGE" -c "
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update -qq
+    apt-get install -y -qq \
+      git wget build-essential ninja-build python3-venv python3-pip \
+      libglib2.0-dev flex bison \
+      libspice-server-dev libspice-protocol-dev \
+      libepoxy-dev libdrm-dev libgbm-dev \
+      libpixman-1-dev zlib1g-dev libfdt-dev \
+      libcap-ng-dev libattr1-dev \
+      pkg-config 2>/dev/null
+
+    echo '  Downloading QEMU ${QEMU_VERSION} source...'
+    wget -q '${QEMU_URL}' -O /tmp/qemu.tar.xz
+    tar xJf /tmp/qemu.tar.xz -C /tmp/
+
+    echo '  Cloning qemu-anti-detection patch...'
+    git clone -q '${PATCH_REPO}' /tmp/qemu-anti-detection
+
+    echo '  Applying patch...'
+    cd /tmp/qemu-${QEMU_VERSION}
+    # Try exact version patch first, then nearest available
+    patch_file=\$(ls /tmp/qemu-anti-detection/qemu-*.patch 2>/dev/null | sort -V | tail -1)
+    if [[ -z \"\$patch_file\" ]]; then
+      echo 'ERROR: No patch file found' >&2
+      exit 1
+    fi
+    echo \"  Using patch: \$(basename \$patch_file)\"
+    git apply \"\$patch_file\" 2>/dev/null || patch -p1 < \"\$patch_file\"
+
+    echo '  Configuring QEMU (x86_64 target only)...'
+    ./configure \
+      --target-list=x86_64-softmmu \
+      --enable-kvm \
+      --enable-spice \
+      --enable-opengl \
+      --disable-docs \
+      --disable-user \
+      2>/dev/null
+
+    echo '  Building QEMU (this takes 20-40 minutes)...'
+    make -j\$(nproc) 2>/dev/null
+
+    cp build/qemu-system-x86_64 /output/
+    echo '  Build complete'
+  " 2>&1 | while IFS= read -r line; do
+    case "$line" in
+      "  "*)  echo "$line" ;;
+      *error*|*Error*|*ERROR*) echo "  $line" ;;
+    esac
+  done
+
+PATCHED_BIN="$OUTPUT_DIR/qemu-system-x86_64"
+if [[ ! -f "$PATCHED_BIN" ]]; then
+  msg_error "Build failed — patched binary not found"
+  echo "  Check Docker daemon logs or try: docker logs $BUILD_CONTAINER"
+  exit 1
+fi
+
+msg_success "Patched QEMU built: $(du -sh "$PATCHED_BIN" | cut -f1)"
+
+# ── Create new Docker image layer with patched QEMU binary ────────────────────
+
+msg_info "Injecting patched QEMU into Docker image..."
+
+QEMU_PATH=$(docker run --rm --entrypoint which "$IMAGE" qemu-system-x86_64 2>/dev/null || echo "/usr/bin/qemu-system-x86_64")
+
+cat > "$OUTPUT_DIR/Dockerfile" <<DOCKERFILE
+FROM $IMAGE
+# qemu-anti-detection: replace QEMU binary with source-patched version
+# Replaces "QEMU HARDDISK", "QEMU DVD-ROM", QEMU device strings with real hardware names
+COPY qemu-system-x86_64 $QEMU_PATH
+RUN chmod 755 $QEMU_PATH
+DOCKERFILE
+
+if ! docker build -t "$IMAGE" "$OUTPUT_DIR" 2>/dev/null; then
+  msg_error "Failed to build final Docker image"
+  exit 1
+fi
+
+msg_success "Docker image updated with patched QEMU"
+echo ""
+echo "Patched strings include:"
+echo "  • QEMU HARDDISK  → real disk model"
+echo "  • QEMU DVD-ROM   → ASUS DRW-24B1ST"
+echo "  • QEMU keyboard  → ASUS keyboard"
+echo "  • QEMU USB       → vendor-named USB controller"
+echo "  • VM bit in UEFI → cleared"
+echo ""
+echo "Run: windows-vm launch"
+echo ""

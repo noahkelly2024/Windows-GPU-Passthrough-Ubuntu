@@ -1436,6 +1436,21 @@ compact_cpu_list() {
   echo "$result"
 }
 
+generate_or_load_vm_mac() {
+  local MAC_FILE="$HOME/.config/windows/mac"
+  if [[ -f "$MAC_FILE" ]]; then
+    cat "$MAC_FILE"
+    return
+  fi
+  # Intel OUI 8C:EC:4B — generates a stable unique MAC per machine
+  local rand
+  rand=$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n' | sed 's/../&:/g;s/:$//')
+  local mac="8C:EC:4B:${rand^^}"
+  mkdir -p "$(dirname "$MAC_FILE")"
+  echo "$mac" > "$MAC_FILE"
+  echo "$mac"
+}
+
 create_docker_compose_config() {
   local COMPOSE_FILE="$1"
   local SELECTED_RAM="$2"
@@ -1632,6 +1647,12 @@ create_docker_compose_config() {
       BOOT_MODE: \"windows_secure\""
   fi
 
+  # Persistent Intel MAC address (EAC checks NIC vendor; Intel OUI avoids QEMU virtual NIC detection)
+  local VM_MAC
+  VM_MAC=$(generate_or_load_vm_mac)
+  local MAC_SECTION="
+      MAC: \"$VM_MAC\""
+
   local CPUSET_SECTION=""
   if [[ -n "$CPU_PINNING_SET" ]]; then
     CPUSET_SECTION="
@@ -1654,7 +1675,7 @@ services:
       DISK_SIZE: "$SELECTED_DISK"
       USERNAME: "$USERNAME"
       PASSWORD: "$PASSWORD"
-      TZ: "$HOST_TZ"$TPM_SECTION$ARGUMENTS_SECTION
+      TZ: "$HOST_TZ"$MAC_SECTION$TPM_SECTION$ARGUMENTS_SECTION
     devices:
       - /dev/kvm
       - /dev/net/tun$DEVICES_KVMFR$DEVICES_VFIO
@@ -1685,7 +1706,7 @@ services:
       DISK_SIZE: "$SELECTED_DISK"
       USERNAME: "$USERNAME"
       PASSWORD: "$PASSWORD"
-      TZ: "$HOST_TZ"$TPM_SECTION$ARGUMENTS_SECTION
+      TZ: "$HOST_TZ"$MAC_SECTION$TPM_SECTION$ARGUMENTS_SECTION
     devices:
       - /dev/kvm
       - /dev/net/tun$DEVICES_KVMFR$DEVICES_VFIO
@@ -2403,6 +2424,14 @@ build_dockurr_windows_with_spice() {
     fi
   fi
 
+  # Remove virtio-balloon from entry.sh — its Windows driver name contains "QEMU",
+  # flagged by anti-cheat. Single-VM setups gain nothing from memory ballooning.
+  local entry_sh
+  entry_sh=$(find . -name "entry.sh" -path "*/src/*" | head -1)
+  if [[ -n "$entry_sh" ]]; then
+    sed -i '/virtio-balloon/d' "$entry_sh"
+  fi
+
   local DOCKER_BUILD_LOG="/tmp/docker-build-$(date +%Y%m%d-%H%M%S).log"
   local TARGETARCH
   TARGETARCH=$(dpkg --print-architecture 2>/dev/null || uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
@@ -2426,16 +2455,21 @@ ensure_dockurr_windows_with_spice() {
     return 1
   fi
 
-  # Check if image exists locally with SPICE and executable entrypoint
+  # Check if image exists locally with SPICE, executable entrypoint, and no balloon
   if docker image inspect dockurr/windows:latest &>/dev/null; then
     if docker history --no-trunc dockurr/windows:latest 2>/dev/null | grep -q 'qemu-system-modules-spice'; then
       if docker run --rm --entrypoint test dockurr/windows:latest -x /run/entry.sh 2>/dev/null; then
-        msg_success "Docker image ready (SPICE support detected)"
-        return 0
+        # Also verify balloon was removed
+        if ! docker run --rm dockurr/windows:latest grep -q 'virtio-balloon' /run/entry.sh 2>/dev/null; then
+          msg_success "Docker image ready (SPICE + anti-detection patches applied)"
+          return 0
+        fi
+        msg_info "Docker image has balloon device — rebuilding with anti-detection patches..."
+      else
+        msg_info "Docker image has wrong permissions — rebuilding..."
       fi
-      msg_info "Docker image has wrong permissions — rebuilding..."
     fi
-    # Image exists but lacks SPICE or has wrong permissions - remove it
+    # Image exists but needs rebuild
     docker rmi dockurr/windows:latest 2>/dev/null || true
   fi
 
@@ -4281,6 +4315,7 @@ system_install() {
     ["gpu-passthrough"]="ubuntu-gpu-passthrough"
     ["snapshot"]="ubuntu-snapshot"
     ["looking-glass-install"]="ubuntu-looking-glass-install"
+    ["qemu-patch"]="ubuntu-qemu-patch"
   )
   for link in "${!symlinks[@]}"; do
     local target="$INSTALL_DIR/${symlinks[$link]}"
@@ -4292,15 +4327,19 @@ system_install() {
   echo ""
   msg_success "Scripts installed. Available commands:"
   echo ""
-  echo "  gpu-passthrough       windows-vm       looking-glass-install       snapshot"
+  echo "  gpu-passthrough       windows-vm       looking-glass-install"
+  echo "  qemu-patch            snapshot"
   echo ""
   echo "Next steps:"
   echo ""
   echo "  1. gpu-passthrough setup       # Configure IOMMU and VFIO (reboot required)"
   echo "  2. looking-glass-install       # Install Looking Glass shared memory display"
-  echo "  3. windows-vm install          # Install and configure Windows VM"
+  echo "  3. windows-vm install          # Install Windows VM"
+  echo "  4. qemu-patch                  # (optional) Deep anti-detection: patch QEMU"
+  echo "                                 #   strings at compile time (20-40 min build)"
   echo ""
-  echo "  Skip step 2 if you only need RDP (no GPU passthrough display)."
+  echo "  After Windows installs, check msinfo32 → System Summary → BIOS Version/Date"
+  echo "  It should show your real motherboard BIOS, not SeaBIOS or OVMF defaults."
   echo ""
 }
 

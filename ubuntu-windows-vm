@@ -1485,6 +1485,110 @@ compact_cpu_list() {
   echo "$result"
 }
 
+detect_evdev_devices() {
+  echo ""
+  echo "Detecting input devices for evdev passthrough..."
+  echo ""
+
+  local -a kbd_candidates=() mouse_candidates=()
+  for dev in /dev/input/by-id/*; do
+    [[ -e "$dev" ]] || continue
+    local name
+    name=$(basename "$dev")
+    [[ "$name" =~ -if[0-9]+-event ]] && continue
+    [[ "$name" =~ event-kbd ]]   && kbd_candidates+=("$dev")
+    [[ "$name" =~ event-mouse ]] && mouse_candidates+=("$dev")
+  done
+
+  # --- Keyboard ---
+  echo "Press any key on the keyboard you want to pass through to the VM..."
+  echo "(waiting up to 10 seconds)"
+  echo ""
+  local tmp_kbd
+  tmp_kbd=$(mktemp)
+  local -a pids=()
+  for dev in "${kbd_candidates[@]}"; do
+    ( timeout 10 cat "$dev" > /dev/null 2>&1 && echo "$dev" > "$tmp_kbd" ) &
+    pids+=($!)
+  done
+  local waited=0
+  while [[ -z "$(cat "$tmp_kbd" 2>/dev/null)" ]] && (( waited < 50 )); do
+    sleep 0.2; (( waited++ ))
+  done
+  for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
+  wait "${pids[@]}" 2>/dev/null || true
+  KB_DEVICE=$(cat "$tmp_kbd" 2>/dev/null)
+  rm -f "$tmp_kbd"
+
+  if [[ -z "$KB_DEVICE" ]]; then
+    msg_warning "No keyboard detected — set it manually in the config"
+    KB_DEVICE="YOUR-KEYBOARD-ID"
+  else
+    msg_success "Keyboard detected: $(basename "$KB_DEVICE")"
+  fi
+
+  sleep 0.5
+  echo ""
+
+  # --- Mouse ---
+  echo "Move your mouse or click a button on the mouse you want to pass through..."
+  echo "(waiting up to 10 seconds)"
+  echo ""
+  local tmp_mouse
+  tmp_mouse=$(mktemp)
+  local -a mpids=()
+  for dev in "${mouse_candidates[@]}"; do
+    ( timeout 10 cat "$dev" > /dev/null 2>&1 && echo "$dev" > "$tmp_mouse" ) &
+    mpids+=($!)
+  done
+  waited=0
+  while [[ -z "$(cat "$tmp_mouse" 2>/dev/null)" ]] && (( waited < 50 )); do
+    sleep 0.2; (( waited++ ))
+  done
+  for pid in "${mpids[@]}"; do kill "$pid" 2>/dev/null || true; done
+  wait "${mpids[@]}" 2>/dev/null || true
+  MOUSE_DEVICE=$(cat "$tmp_mouse" 2>/dev/null)
+  rm -f "$tmp_mouse"
+
+  if [[ -z "$MOUSE_DEVICE" ]]; then
+    msg_warning "No mouse detected — set it manually in the config"
+    MOUSE_DEVICE="YOUR-MOUSE-ID"
+  else
+    msg_success "Mouse detected:    $(basename "$MOUSE_DEVICE")"
+  fi
+
+  echo ""
+  echo "Detected devices:"
+  echo "  Keyboard: $KB_DEVICE"
+  echo "  Mouse:    $MOUSE_DEVICE"
+  echo ""
+
+  local input_conf="$HOME/.config/windows/input-devices"
+  mkdir -p "$(dirname "$input_conf")"
+  printf 'KB_DEVICE="%s"\nMOUSE_DEVICE="%s"\n' "$KB_DEVICE" "$MOUSE_DEVICE" > "$input_conf"
+  msg_success "Saved to $input_conf"
+}
+
+load_or_detect_evdev() {
+  local input_conf="$HOME/.config/windows/input-devices"
+  KB_DEVICE="YOUR-KEYBOARD-ID"
+  MOUSE_DEVICE="YOUR-MOUSE-ID"
+
+  if [[ -f "$input_conf" ]]; then
+    # shellcheck source=/dev/null
+    source "$input_conf"
+    msg_success "Using saved input devices"
+    echo "  Keyboard: $KB_DEVICE"
+    echo "  Mouse:    $MOUSE_DEVICE"
+    echo ""
+    if ! confirm "Use these devices? (No to re-detect)"; then
+      detect_evdev_devices
+    fi
+  else
+    detect_evdev_devices
+  fi
+}
+
 generate_or_load_vm_mac() {
   local MAC_FILE="$HOME/.config/windows/mac"
   if [[ -f "$MAC_FILE" ]]; then
@@ -1639,8 +1743,8 @@ create_docker_compose_config() {
         -device virtio-serial-pci
         -device virtserialport,chardev=spicechannel0,name=com.redhat.spice.0
         -chardev spicevmc,id=spicechannel0,name=vdagent
-        -object input-linux,id=kbd,evdev=/dev/input/by-id/YOUR-KEYBOARD-ID,grab_all=on
-        -object input-linux,id=mouse,evdev=/dev/input/by-id/YOUR-MOUSE-ID
+        -object input-linux,id=kbd,evdev=${KB_DEVICE},grab_all=on
+        -object input-linux,id=mouse,evdev=${MOUSE_DEVICE}
         -global ICH9-LPC.disable_s3=1
         -global ICH9-LPC.disable_s4=1
 
@@ -3467,6 +3571,14 @@ install_windows() {
     if command -v update-desktop-database &>/dev/null; then
       update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
     fi
+  fi
+
+  # Detect or load evdev input devices (only needed when GPU passthrough + SPICE is used)
+  if [[ "$GPU_PASSTHROUGH_ENABLED" == true ]]; then
+    load_or_detect_evdev
+  else
+    KB_DEVICE="YOUR-KEYBOARD-ID"
+    MOUSE_DEVICE="YOUR-MOUSE-ID"
   fi
 
   mkdir -p "$WINDOWS_STORAGE_DIR"

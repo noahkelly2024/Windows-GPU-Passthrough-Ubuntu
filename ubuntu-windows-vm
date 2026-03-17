@@ -1525,7 +1525,7 @@ create_docker_compose_config() {
   # Detect CPU pinning based on selected cores
   detect_cpu_pinning_set "$SELECTED_CORES"
 
-  local MACHINE_FLAGS="-machine kernel-irqchip=on"
+  local MACHINE_FLAGS='-machine q35,kernel-irqchip=on,acpi=on,vmport=off,oem-id=ALASKA,oem-table-id=A\ M\ I\ '
   local CPU_EXTRA=""
 
   if grep -qi 'GenuineIntel' /proc/cpuinfo 2>/dev/null; then
@@ -1539,7 +1539,7 @@ create_docker_compose_config() {
   # hv-passthrough: enables all KVM-supported Hyper-V enlightenments at once
   # host-cache-info: passes real L2/L3 cache topology (EAC fingerprints this)
   # invtsc: invariant TSC for accurate timing; migratable=off: expose non-migratable features
-  local CPU_FLAGS="-cpu host,kvm=off,-hypervisor,hv-vendor-id=0123756792CD,hv-passthrough=on,hv-time=on,host-cache-info=on,apic=on,invtsc=on,migratable=off,+pdpe1gb${CPU_EXTRA}"
+  local CPU_FLAGS="-cpu host,kvm=off,-hypervisor,hv-vendor-id=0123756792CD,hv-passthrough=on,hv-time=on,host-cache-info=on,apic=on,invtsc=on,rdtscp=off,migratable=off,+pdpe1gb${CPU_EXTRA}"
 
   # Auto-detect host timezone
   local HOST_TZ=""
@@ -1551,6 +1551,10 @@ create_docker_compose_config() {
     HOST_TZ="${HOST_TZ//[[:space:]]/}"
   fi
   [[ -z "$HOST_TZ" ]] && HOST_TZ="UTC"
+
+  # Generate/load persistent Intel MAC (needed in ARGUMENTS for e1000e NIC)
+  local VM_MAC
+  VM_MAC=$(generate_or_load_vm_mac)
 
   # Build ARGUMENTS section based on configuration
   local ARGUMENTS_SECTION=""
@@ -1570,6 +1574,11 @@ create_docker_compose_config() {
         ${SMBIOS_FLAGS# }"
     [[ -n "$DISK_FLAGS" ]] && ARGUMENTS_SECTION+="
         ${DISK_FLAGS# }"
+    ARGUMENTS_SECTION+="
+        -vga none
+        -global scsi-hd.vendor=ATA
+        -device e1000e,netdev=net0,mac=${VM_MAC}
+        -netdev user,id=net0"
     ARGUMENTS_SECTION+="
         -device ivshmem-plain,id=shmem0,memdev=looking-glass
         -object memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=${IVSHMEM_SIZE}M,share=yes"
@@ -1630,22 +1639,22 @@ create_docker_compose_config() {
         -device virtio-serial-pci
         -device virtserialport,chardev=spicechannel0,name=com.redhat.spice.0
         -chardev spicevmc,id=spicechannel0,name=vdagent
-        -device virtio-mouse-pci
-        -device virtio-keyboard-pci
+        -object input-linux,id=kbd,evdev=/dev/input/by-id/YOUR-KEYBOARD-ID,grab_all=on
+        -object input-linux,id=mouse,evdev=/dev/input/by-id/YOUR-MOUSE-ID
         -global ICH9-LPC.disable_s3=1
         -global ICH9-LPC.disable_s4=1
 
       USB: \"no\""
   elif [[ "$LG_ENABLED" == true ]]; then
     # Looking Glass only (no GPU passthrough)
-    local LG_ARGS="$MACHINE_FLAGS $CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS -device ivshmem-plain,id=shmem0,memdev=looking-glass -object memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=${IVSHMEM_SIZE}M,share=yes"
+    local LG_ARGS="$MACHINE_FLAGS $CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS -vga none -global scsi-hd.vendor=ATA -device ivshmem-plain,id=shmem0,memdev=looking-glass -object memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=${IVSHMEM_SIZE}M,share=yes"
     LG_ARGS="${LG_ARGS# }" # Trim leading space
     ARGUMENTS_SECTION="
       ARGUMENTS: \"$LG_ARGS\""
   else
     # No GPU passthrough, no Looking Glass - CPU-only VM with anti-cheat flags
     if [[ -n "$MACHINE_FLAGS" ]] || [[ "$CPU_FLAGS" != "-cpu host" ]] || [[ -n "$SMBIOS_FLAGS" ]] || [[ -n "$DISK_FLAGS" ]] || [[ -n "$SMP_FLAGS" ]]; then
-      local CPU_ARGS="$MACHINE_FLAGS $CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS"
+      local CPU_ARGS="$MACHINE_FLAGS $CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS -vga none -global scsi-hd.vendor=ATA"
       CPU_ARGS="${CPU_ARGS# }" # Trim leading space
       ARGUMENTS_SECTION="
       ARGUMENTS: \"$CPU_ARGS\""
@@ -1696,9 +1705,8 @@ create_docker_compose_config() {
       BOOT_MODE: \"windows_secure\""
   fi
 
-  # Persistent Intel MAC address (EAC checks NIC vendor; Intel OUI avoids QEMU virtual NIC detection)
-  local VM_MAC
-  VM_MAC=$(generate_or_load_vm_mac)
+  # MAC_SECTION injects the Intel MAC into dockurr/windows env (controls virtio-net MAC)
+  # The actual e1000e NIC is added via ARGUMENTS above for proper Intel NIC spoofing
   local MAC_SECTION="
       MAC: \"$VM_MAC\""
 

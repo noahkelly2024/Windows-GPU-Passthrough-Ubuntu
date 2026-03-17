@@ -1187,6 +1187,15 @@ detect_smbios_and_disk_info() {
     [[ -n "$MEM_SPEED" ]] && SMBIOS_FLAGS="${SMBIOS_FLAGS},speed=${MEM_SPEED}"
   fi
 
+  # SMBIOS Type 11: OEM Strings (EAC enumerates this; match host value)
+  local OEM_STRING
+  OEM_STRING="$(sudo -n /usr/bin/dmidecode -t 11 2>/dev/null | grep 'String 1:' | head -1 | sed 's/.*String 1: //' | xargs)"
+  if is_valid_smbios_value "$OEM_STRING"; then
+    SMBIOS_FLAGS="${SMBIOS_FLAGS} -smbios type=11,value=$(escape_for_qemu "$OEM_STRING")"
+  else
+    SMBIOS_FLAGS="${SMBIOS_FLAGS} -smbios type=11,value=Default_string"
+  fi
+
   # Disk spoofing - detect disk containing $HOME (where VM data lives)
   local HOME_PARTITION DISK_DEVICE=""
   HOME_PARTITION=$(df -P "$HOME" 2>/dev/null | tail -1 | awk '{print $1}')
@@ -1453,20 +1462,20 @@ create_docker_compose_config() {
   detect_cpu_pinning_set "$SELECTED_CORES"
 
   local MACHINE_FLAGS="-machine kernel-irqchip=on"
-  local HV_VENDOR_ID="AuthenticAMD"
   local CPU_EXTRA=""
 
   if grep -qi 'GenuineIntel' /proc/cpuinfo 2>/dev/null; then
-    HV_VENDOR_ID="GenuineIntel"
-    CPU_EXTRA=",+hv-evmcs"
-    [[ "$LG_ENABLED" == true ]] && CPU_EXTRA="${CPU_EXTRA},host-phys-bits-limit=39"
+    [[ "$LG_ENABLED" == true ]] && CPU_EXTRA=",host-phys-bits-limit=39"
   else
-    if [[ "$SMT_ENABLED" == true ]]; then
-      CPU_EXTRA=",+topoext"
-    fi
+    # AMD: expose SMT topology explicitly
+    [[ "$SMT_ENABLED" == true ]] && CPU_EXTRA=",+topoext"
   fi
 
-  local CPU_FLAGS="-cpu host,-hypervisor,hv_vendor_id=${HV_VENDOR_ID},+pdpe1gb,+tsc-deadline${CPU_EXTRA}"
+  # hv-vendor-id: hex string avoids EAC blocking "Microsoft HV" default
+  # hv-passthrough: enables all KVM-supported Hyper-V enlightenments at once
+  # host-cache-info: passes real L2/L3 cache topology (EAC fingerprints this)
+  # invtsc: invariant TSC for accurate timing; migratable=off: expose non-migratable features
+  local CPU_FLAGS="-cpu host,kvm=off,-hypervisor,hv-vendor-id=0123756792CD,hv-passthrough=on,hv-time=on,host-cache-info=on,apic=on,invtsc=on,migratable=off,+pdpe1gb${CPU_EXTRA}"
 
   # Auto-detect host timezone
   local HOST_TZ=""

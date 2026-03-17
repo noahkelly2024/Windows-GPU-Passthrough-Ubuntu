@@ -2896,24 +2896,32 @@ install_windows() {
   fi
   echo ""
 
-  # Build list of drives: real block devices with a mount point, exclude boot/EFI/swap
-  local -a drive_mounts drive_labels
-  while IFS= read -r line; do
-    local mp size fstype
-    mp=$(echo "$line"   | awk '{print $1}')
-    size=$(echo "$line" | awk '{print $2}')
-    fstype=$(echo "$line" | awk '{print $3}')
-    # Skip tmpfs, devtmpfs, squashfs, efivarfs, overlay, proc, sys, etc.
-    [[ "$fstype" =~ ^(tmpfs|devtmpfs|squashfs|efivarfs|overlay|proc|sysfs|cgroup|pstore|bpf|hugetlbfs|mqueue|debugfs|tracefs|fusectl|configfs|securityfs|ramfs)$ ]] && continue
-    # Skip small partitions (< 5 GB) — likely boot/EFI
-    local size_gb
-    size_gb=$(df -BG "$mp" 2>/dev/null | awk 'NR==2{gsub(/G/,"",$4); print int($4)}')
-    [[ "$size_gb" -lt 5 ]] 2>/dev/null && continue
+  # Build list of drives from lsblk — real block device mount points only
+  local -a drive_mounts=() drive_labels=()
+  while IFS= read -r mp; do
+    [[ -z "$mp" ]] && continue
+    # Skip boot/EFI/run/sys/proc/dev subtrees
+    [[ "$mp" =~ ^(/boot|/efi|/boot/efi|/run|/sys|/proc|/dev) ]] && continue
+    # Skip virtual/non-writable filesystems
+    local fstype
+    fstype=$(stat -f -c '%T' "$mp" 2>/dev/null)
+    [[ "$fstype" =~ ^(tmpfs|devtmpfs|squashfs|efivarfs|overlay|vfat|proc|sysfs)$ ]] && continue
+    # Skip if not enough free space (< 5 GB)
+    local free_gb
+    free_gb=$(df -BG "$mp" 2>/dev/null | awk 'NR==2{gsub(/G/,"",$4); print int($4)}')
+    [[ ! "$free_gb" =~ ^[0-9]+$ ]] && continue
+    [[ "$free_gb" -lt 5 ]] && continue
+    # Detect SSD vs HDD via the underlying block device
+    local dev rota drive_type total_size
+    dev=$(df "$mp" 2>/dev/null | awk 'NR==2{print $1}')
+    rota=$(lsblk -no ROTA "$dev" 2>/dev/null | head -1)
+    total_size=$(lsblk -no SIZE "$dev" 2>/dev/null | head -1)
+    [[ "$rota" == "0" ]] && drive_type="SSD/NVMe" || drive_type="HDD"
     local display_mp="$mp"
-    [[ "$mp" == "/" ]] && display_mp="$HOME  (root filesystem)"
+    [[ "$mp" == "/" ]] && display_mp="$HOME  (root)"
     drive_mounts+=("$mp")
-    drive_labels+=("$display_mp  ($size, $(df -BG "$mp" 2>/dev/null | awk 'NR==2{gsub(/G/,"",$4); print $4}')G free)")
-  done < <(df -h --output=target,size,fstype 2>/dev/null | tail -n +2 | sort -u)
+    drive_labels+=("$display_mp  [$drive_type, ${free_gb}G free of ${total_size}]")
+  done < <(lsblk -no MOUNTPOINT 2>/dev/null | grep '^/' | sort -u)
 
   echo "  Select a drive to store the VM disk (windows-vm/ folder will be created):"
   echo ""

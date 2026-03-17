@@ -1525,7 +1525,7 @@ create_docker_compose_config() {
   # Detect CPU pinning based on selected cores
   detect_cpu_pinning_set "$SELECTED_CORES"
 
-  local MACHINE_FLAGS='-machine q35,kernel-irqchip=on,acpi=on,vmport=off,oem-id=ALASKA,oem-table-id=A\ M\ I\ '
+  local MACHINE_FLAGS="-machine q35,kernel-irqchip=on,acpi=on,vmport=off,oem-id=ALASKA,oem-table-id=AMI"
   local CPU_EXTRA=""
 
   if grep -qi 'GenuineIntel' /proc/cpuinfo 2>/dev/null; then

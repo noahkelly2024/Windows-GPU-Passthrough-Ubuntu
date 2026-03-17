@@ -1539,7 +1539,7 @@ create_docker_compose_config() {
   # hv-passthrough: enables all KVM-supported Hyper-V enlightenments at once
   # host-cache-info: passes real L2/L3 cache topology (EAC fingerprints this)
   # invtsc: invariant TSC for accurate timing; migratable=off: expose non-migratable features
-  local CPU_FLAGS="-cpu host,kvm=off,-hypervisor,hv-vendor-id=0123756792CD,hv-passthrough=on,hv-time=on,host-cache-info=on,apic=on,invtsc=on,rdtscp=off,migratable=off,+pdpe1gb${CPU_EXTRA}"
+  local CPU_FLAGS="-cpu host,kvm=off,-hypervisor,hv-vendor-id=0123756792CD,hv-passthrough=on,hv-time=on,host-cache-info=on,apic=on,+invtsc,rdtscp=off,migratable=off,+pdpe1gb${CPU_EXTRA}"
 
   # Auto-detect host timezone
   local HOST_TZ=""
@@ -1652,7 +1652,7 @@ create_docker_compose_config() {
     # Looking Glass only (no GPU passthrough)
     local _lg_disk_fallback=""
     [[ -z "$DISK_FLAGS" ]] && _lg_disk_fallback="-global scsi-hd.vendor=ATA "
-    local LG_ARGS="$MACHINE_FLAGS $CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS ${_lg_disk_fallback}-device ivshmem-plain,id=shmem0,memdev=looking-glass -object memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=${IVSHMEM_SIZE}M,share=yes"
+    local LG_ARGS="$CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS ${_lg_disk_fallback}-device ivshmem-plain,id=shmem0,memdev=looking-glass -object memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=${IVSHMEM_SIZE}M,share=yes"
     LG_ARGS="${LG_ARGS# }" # Trim leading space
     ARGUMENTS_SECTION="
       ARGUMENTS: \"$LG_ARGS\""
@@ -1661,7 +1661,7 @@ create_docker_compose_config() {
     if [[ -n "$MACHINE_FLAGS" ]] || [[ "$CPU_FLAGS" != "-cpu host" ]] || [[ -n "$SMBIOS_FLAGS" ]] || [[ -n "$DISK_FLAGS" ]] || [[ -n "$SMP_FLAGS" ]]; then
       local _cpu_disk_fallback=""
       [[ -z "$DISK_FLAGS" ]] && _cpu_disk_fallback=" -global scsi-hd.vendor=ATA"
-      local CPU_ARGS="$MACHINE_FLAGS $CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS${_cpu_disk_fallback}"
+      local CPU_ARGS="$CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS${_cpu_disk_fallback}"
       CPU_ARGS="${CPU_ARGS# }" # Trim leading space
       ARGUMENTS_SECTION="
       ARGUMENTS: \"$CPU_ARGS\""

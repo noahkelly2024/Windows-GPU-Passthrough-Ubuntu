@@ -3,7 +3,7 @@
 # Get script directory for accessing resources (icons, etc.)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
-# Add script directory to PATH so sibling scripts (ubuntu-gpu-passthrough, etc.) are found
+# Add script directory to PATH so sibling scripts (gpu-passthrough, etc.) are found
 export PATH="$SCRIPT_DIR:$PATH"
 
 COMPOSE_FILE="$HOME/.config/windows/docker-compose.yml"
@@ -209,7 +209,7 @@ warn_if_gpu_iotlb_error() {
     if ubuntu-gpu-passthrough-info gpu-health &>/dev/null; then
       msg_warning "GPU Health: IOTLB_INV_TIMEOUT detected"
       echo "   The GPU may need a cold boot (poweroff + unplug power 30s)"
-      echo "   Details: ubuntu-gpu-passthrough-info health"
+      echo "   Details: gpu-passthrough info health"
     fi
   fi
 }
@@ -3085,11 +3085,11 @@ install_windows() {
           GPU_PASSTHROUGH_NEEDS_SETUP=true
           GPU_PASSTHROUGH_ENABLED=true
         else
-          msg_info "Skipping - configure later with: ubuntu-gpu-passthrough setup"
+          msg_info "Skipping - configure later with: gpu-passthrough setup"
         fi
       fi
     else
-      msg_info "GPU passthrough not available (ubuntu-gpu-passthrough not installed)"
+      msg_info "GPU passthrough not available (gpu-passthrough not installed)"
     fi
   fi
 
@@ -3211,7 +3211,7 @@ install_windows() {
     echo "Configuring GPU passthrough..."
     echo ""
 
-    if ubuntu-gpu-passthrough setup; then
+    if gpu-passthrough setup; then
       msg_success "GPU passthrough configured successfully!"
       echo ""
       msg_warning "SYSTEM REBOOT REQUIRED"
@@ -3219,7 +3219,7 @@ install_windows() {
       echo "Kernel parameters have been configured and require reboot."
       echo ""
       echo "After reboot:"
-      echo "   1. Verify GPU passthrough: ubuntu-gpu-passthrough info verify"
+      echo "   1. Verify GPU passthrough: gpu-passthrough info verify"
       echo "   2. Re-run Windows VM installation: windows-vm install"
       echo ""
       exit 0
@@ -3235,7 +3235,7 @@ install_windows() {
 
       echo ""
       msg_info "Continuing without GPU passthrough"
-      msg_info "You can configure it later with: ubuntu-gpu-passthrough setup"
+      msg_info "You can configure it later with: gpu-passthrough setup"
       echo ""
 
       GPU_PASSTHROUGH_ENABLED=false
@@ -3411,16 +3411,16 @@ EOF
 
   # Bind GPU to VFIO before starting Docker (if GPU passthrough enabled)
   if [[ "$GPU_PASSTHROUGH_ENABLED" == true ]]; then
-    if ! command -v ubuntu-gpu-passthrough &>/dev/null; then
-      msg_error "ubuntu-gpu-passthrough not found"
+    if ! command -v gpu-passthrough &>/dev/null; then
+      msg_error "gpu-passthrough not found"
       exit 1
     fi
 
     # Check current GPU driver and bind if needed
     CURRENT_DRIVER=$(lspci -k -s "$GPU_PCI_ADDR" 2>/dev/null | grep "Kernel driver in use" | awk '{print $5}')
     if [[ "$CURRENT_DRIVER" != "vfio-pci" ]]; then
-      # ubuntu-gpu-passthrough mode vm prints its own status messages
-      if ! ubuntu-gpu-passthrough mode vm 2>&1; then
+      # gpu-passthrough mode vm prints its own status messages
+      if ! gpu-passthrough mode vm 2>&1; then
         msg_error "Failed to bind GPU to VFIO"
         exit 1
       fi
@@ -3798,7 +3798,7 @@ launch_windows() {
           echo "  2. Unplug power for 30 seconds"
           echo "  3. Power on"
           echo ""
-          echo "Details: ubuntu-gpu-passthrough-info health"
+          echo "Details: gpu-passthrough info health"
           exit 1
         fi
       fi
@@ -3821,11 +3821,11 @@ launch_windows() {
 
               if [[ "$CURRENT_DRIVER" != "vfio-pci" ]]; then
                 echo "  GPU not bound to VFIO, binding now..."
-                if command -v ubuntu-gpu-passthrough &>/dev/null; then
-                  if ubuntu-gpu-passthrough mode vm 2>&1; then
+                if command -v gpu-passthrough &>/dev/null; then
+                  if gpu-passthrough mode vm 2>&1; then
                     msg_success "GPU switched to VM mode successfully"
                   else
-                    msg_warning "GPU mode switch may have failed, check with: ubuntu-gpu-passthrough mode"
+                    msg_warning "GPU mode switch may have failed, check with: gpu-passthrough mode"
                   fi
                 fi
               else
@@ -4072,7 +4072,7 @@ stop_windows() {
   if [[ "$gpu_mode" == "vm" ]]; then
     echo ""
 
-    if command -v ubuntu-gpu-passthrough &>/dev/null; then
+    if command -v gpu-passthrough &>/dev/null; then
       # Check if GPU has AMD reset bug (requires reboot to rebind to native driver)
       # Affected: Vega 10/20, Fiji, Tonga, Hawaii, some Polaris, some Navi 10/14
       local has_reset_bug=false
@@ -4086,7 +4086,7 @@ stop_windows() {
         # GPUs with reset bug: keep in vm mode (vfio-pci) for next session
         msg_info "AMD GPU with reset bug: keeping in VM mode (vfio-pci)"
         echo "   GPU stays ready for next VM session"
-        echo "   To use on host: reboot system, then: ubuntu-gpu-passthrough mode host"
+        echo "   To use on host: reboot system, then: gpu-passthrough mode host"
         notify_silent "Windows VM" "GPU stays in VM mode (reset bug)" "normal"
       else
         # GPUs without reset bug: restore to none mode
@@ -4099,12 +4099,12 @@ stop_windows() {
         fi
 
         if [[ "$actual_mode" == "vm" ]]; then
-          if ubuntu-gpu-passthrough mode none 2>/dev/null; then
+          if gpu-passthrough mode none 2>/dev/null; then
             msg_success "GPU restored to mode=none"
             notify_silent "Windows VM" "GPU restored to mode=none" "normal"
           else
             msg_warning "Failed to restore GPU"
-            echo "   You can manually restore: ubuntu-gpu-passthrough mode none"
+            echo "   You can manually restore: gpu-passthrough mode none"
             notify_silent "Windows VM" "Failed to restore GPU" "critical"
           fi
         else
@@ -4116,7 +4116,7 @@ stop_windows() {
     else
       msg_warning "GPU passthrough tools not found"
       echo "   GPU may still be bound to vfio-pci"
-      echo "   Manual restore: ubuntu-gpu-passthrough mode none"
+      echo "   Manual restore: gpu-passthrough mode none"
     fi
     echo ""
   fi
@@ -4271,7 +4271,7 @@ system_install() {
     ["windows-vm"]="ubuntu-windows-vm"
     ["gpu-passthrough"]="ubuntu-gpu-passthrough"
     ["snapshot"]="ubuntu-snapshot"
-    ["looking-glass-install"]="looking-glass-install"
+    ["looking-glass-install"]="ubuntu-looking-glass-install"
   )
   for link in "${!symlinks[@]}"; do
     local target="$INSTALL_DIR/${symlinks[$link]}"
@@ -4281,7 +4281,18 @@ system_install() {
   done
 
   echo ""
-  msg_success "Done! You can now run: windows-vm install"
+  msg_success "Scripts installed. Available commands:"
+  echo ""
+  echo "  gpu-passthrough       windows-vm       looking-glass-install       snapshot"
+  echo ""
+  echo "Next steps:"
+  echo ""
+  echo "  1. gpu-passthrough setup       # Configure IOMMU and VFIO (reboot required)"
+  echo "  2. looking-glass-install       # Install Looking Glass shared memory display"
+  echo "  3. windows-vm install          # Install and configure Windows VM"
+  echo ""
+  echo "  Skip step 2 if you only need RDP (no GPU passthrough display)."
+  echo ""
 }
 
 # Main command dispatcher

@@ -7,11 +7,11 @@ DESCRIPTION="${2:-}"  # Optional custom description
 OMARCHY_PATH=${OMARCHY_PATH:-$HOME/.local/share/ubuntu}
 
 if [[ -z $COMMAND ]]; then
-  echo "Usage: ubuntu-snapshot <create|restore> [description]" >&2
+  echo "Usage: snapshot <create|restore> [description]" >&2
   echo "" >&2
   echo "Examples:" >&2
-  echo "  ubuntu-snapshot create                    # Uses ubuntu version as description" >&2
-  echo "  ubuntu-snapshot create \"GPU Passthrough\"  # Custom description" >&2
+  echo "  snapshot create                    # Uses ubuntu version as description" >&2
+  echo "  snapshot create \"GPU Passthrough\"  # Custom description" >&2
   exit 1
 fi
 

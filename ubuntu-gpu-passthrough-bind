@@ -128,7 +128,7 @@ check_gpu_processes() {
           echo ""
           msg_warning "Solution: Run from TTY or SSH"
           echo "   1. Switch to TTY (Ctrl+Alt+F2) or SSH from another machine"
-          echo "   2. Run: ubuntu-gpu-passthrough mode vm"
+          echo "   2. Run: gpu-passthrough mode vm"
           echo "   3. Start VM from there"
           echo ""
           log_error "Bind aborted: Compositor (${compositor_pids}) holding NVIDIA handle (would crash on unbind)"
@@ -193,13 +193,13 @@ check_gpu_processes() {
 
     msg_warning "GPU is bound to vfio-pci and in use (likely by running VM)"
     echo "To unbind GPU:"
-    echo "   1. Stop your VM: ubuntu-windows-vm stop"
+    echo "   1. Stop your VM: windows-vm stop"
     if [[ -n "$first_pid" ]]; then
       echo "   2. Or kill QEMU: sudo kill -9 $first_pid"
     else
       echo "   2. Or kill QEMU: sudo pkill -9 qemu-system-x86_64"
     fi
-    echo "   3. Then retry: ubuntu-gpu-passthrough mode host"
+    echo "   3. Then retry: gpu-passthrough mode host"
     echo ""
     log_error "Cannot unbind: GPU in use by VFIO process (VM likely running)"
     exit 1
@@ -276,7 +276,7 @@ check_display_safety() {
       msg_warning "Solution:"
       echo "   1. Move monitor cable to iGPU port (motherboard HDMI/DP)"
       echo "   2. Set BIOS: Primary Display = IGD"
-      echo "   3. Reboot and run: ubuntu-gpu-passthrough setup"
+      echo "   3. Reboot and run: gpu-passthrough setup"
       echo ""
       log_error "Bind aborted: Monitor connected to dedicated GPU (would cause blackscreen)"
       exit 1
@@ -393,7 +393,7 @@ cmd_bind() {
   if ! load_gpu_config; then
     msg_section "GPU Mode: VM"
     msg_error "GPU passthrough not configured"
-    msg_info "Run: ubuntu-gpu-passthrough setup"
+    msg_info "Run: gpu-passthrough setup"
     log_error "Bind failed: GPU passthrough not configured"
     exit 1
   fi
@@ -537,7 +537,7 @@ cmd_bind() {
   done
 
   if [[ "$bind_issues" -eq 1 ]]; then
-    msg_info "Fix: Re-run 'ubuntu-gpu-passthrough setup' then reboot"
+    msg_info "Fix: Re-run 'gpu-passthrough setup' then reboot"
   fi
 
   show_spinner 1 "Verifying GPU binding..."
@@ -582,7 +582,7 @@ cmd_set_none() {
   if ! load_gpu_config; then
     msg_section "GPU Mode: None"
     msg_error "GPU passthrough not configured"
-    msg_info "Run: ubuntu-gpu-passthrough setup"
+    msg_info "Run: gpu-passthrough setup"
     log_error "Set none failed: GPU passthrough not configured"
     exit 1
   fi
@@ -669,7 +669,7 @@ cmd_unbind() {
   if ! load_gpu_config; then
     msg_section "GPU Mode: Host"
     msg_error "GPU passthrough not configured"
-    msg_info "Run: ubuntu-gpu-passthrough setup"
+    msg_info "Run: gpu-passthrough setup"
     log_error "Unbind failed: GPU passthrough not configured"
     exit 1
   fi
@@ -809,7 +809,7 @@ cmd_unbind() {
     8086) inferred_driver="i915" ;;
     *)
       msg_error "Cannot determine native driver for vendor: $GPU_VENDOR_ID"
-      msg_info "Re-run setup: ubuntu-gpu-passthrough setup"
+      msg_info "Re-run setup: gpu-passthrough setup"
       log_error "Invalid GPU_DRIVER_ORIGINAL and cannot infer from vendor ID"
       exit 1
       ;;
@@ -989,7 +989,7 @@ cmd_persistent() {
   if ! load_gpu_config; then
     msg_section "GPU Persistent Mode"
     msg_error "GPU passthrough not configured"
-    msg_info "Run: ubuntu-gpu-passthrough setup"
+    msg_info "Run: gpu-passthrough setup"
     exit 1
   fi
 
@@ -1044,11 +1044,11 @@ cmd_persistent() {
       echo "GPU will boot with native driver ($GPU_DRIVER_ORIGINAL)"
     fi
     echo ""
-    echo "Usage: ubuntu-gpu-passthrough persistent [on|off]"
+    echo "Usage: gpu-passthrough persistent [on|off]"
     ;;
   *)
     msg_error "Invalid action: $action"
-    echo "Usage: ubuntu-gpu-passthrough persistent [on|off]"
+    echo "Usage: gpu-passthrough persistent [on|off]"
     exit 1
     ;;
   esac
@@ -1076,7 +1076,7 @@ cmd_mode_set() {
     echo ""
     msg_error "Invalid mode: $target"
     echo "Valid modes: none, vm, host"
-    echo "Usage: ubuntu-gpu-passthrough mode [none|vm|host]"
+    echo "Usage: gpu-passthrough mode [none|vm|host]"
     echo ""
     exit 1
     ;;
@@ -1092,7 +1092,7 @@ cmd_mode_get() {
   if ! load_gpu_config; then
     echo ""
     msg_error "GPU passthrough not configured"
-    msg_info "Run: ubuntu-gpu-passthrough setup"
+    msg_info "Run: gpu-passthrough setup"
     exit 1
   fi
 
@@ -1172,8 +1172,8 @@ show_bind_help() {
   cat <<EOF
 GPU Passthrough Binding Operations
 
-Usage: ubuntu-gpu-passthrough mode [none|vm|host]
-       ubuntu-gpu-passthrough persistent [on|off]
+Usage: gpu-passthrough mode [none|vm|host]
+       gpu-passthrough persistent [on|off]
 
 MODE COMMANDS:
   mode              Show current GPU mode
@@ -1190,10 +1190,10 @@ OPTIONS:
   -h, --help        Show this help
 
 EXAMPLES:
-  ubuntu-gpu-passthrough mode         # Show current mode
-  ubuntu-gpu-passthrough mode vm      # Switch to VM mode
-  ubuntu-gpu-passthrough persistent   # Show persistent status
-  ubuntu-gpu-passthrough persistent off  # Disable, then reboot for host
+  gpu-passthrough mode         # Show current mode
+  gpu-passthrough mode vm      # Switch to VM mode
+  gpu-passthrough persistent   # Show persistent status
+  gpu-passthrough persistent off  # Disable, then reboot for host
 
 AMD RESET BUG:
   Some AMD GPUs (Vega, Navi, Polaris) cannot rebind to native driver
@@ -1225,7 +1225,7 @@ persistent)
 *)
   if [[ -z "${1:-}" ]]; then
     echo ""
-    echo "Missing command. Usage: ubuntu-gpu-passthrough mode [none|vm|host]"
+    echo "Missing command. Usage: gpu-passthrough mode [none|vm|host]"
     echo ""
   else
     echo ""

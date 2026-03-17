@@ -32,7 +32,7 @@ verify_hardware_requirements() {
     else
       iommu_status=", IOMMU not detected"
       [[ "$quiet" != "true" ]] && msg_error "  IOMMU not detected"
-      [[ "$quiet" != "true" ]] && echo "    Fix: ubuntu-gpu-passthrough setup (adds kernel params + BIOS guidance)"
+      [[ "$quiet" != "true" ]] && echo "    Fix: gpu-passthrough setup (adds kernel params + BIOS guidance)"
       ((errors++))
     fi
     [[ "$quiet" != "true" ]] && msg_success "  $GPU_COUNT GPUs detected$iommu_status"
@@ -247,7 +247,7 @@ verify_usb_controller_setup() {
   if [[ "$found_usb_issue" == "true" ]]; then
     [[ "$quiet" != "true" ]] && echo ""
     [[ "$quiet" != "true" ]] && msg_info "USB controller is bound to wrong driver. Possible fixes:"
-    [[ "$quiet" != "true" ]] && echo "    1. Re-run: ubuntu-gpu-passthrough setup"
+    [[ "$quiet" != "true" ]] && echo "    1. Re-run: gpu-passthrough setup"
     [[ "$quiet" != "true" ]] && echo "    2. Reboot after setup"
     if [[ "$has_usb_ids" != "true" ]]; then
       [[ "$quiet" != "true" ]] && echo "    Note: vfio.conf missing ids= line"
@@ -370,9 +370,9 @@ verify_setup() {
       msg_info "Status: Not configured"
       echo ""
       echo "Next steps:"
-      echo "   1. Run: ubuntu-gpu-passthrough setup"
+      echo "   1. Run: gpu-passthrough setup"
       echo "   2. Reboot system"
-      echo "   3. Run: ubuntu-gpu-passthrough info verify"
+      echo "   3. Run: gpu-passthrough info verify"
     elif [[ "$total_errors" -eq 0 ]] && [[ "$vfio_gpus" -gt 0 ]]; then
       msg_success "Status: Ready for GPU passthrough!"
       echo ""
@@ -397,8 +397,8 @@ verify_setup() {
         msg_success "Kernel parameters active"
         echo ""
         echo "To use GPU:"
-        echo "  • For VM: ubuntu-gpu-passthrough mode vm"
-        echo "  • For host (CUDA/compute): ubuntu-gpu-passthrough mode host"
+        echo "  • For VM: gpu-passthrough mode vm"
+        echo "  • For host (CUDA/compute): gpu-passthrough mode host"
         ;;
       host)
         msg_success "Status: GPU bound to native driver"
@@ -422,26 +422,26 @@ verify_setup() {
             fi
           else
             msg_warning "nvidia_drm not loaded (external displays won't work)"
-            echo "  Fix: re-run 'ubuntu-gpu-passthrough setup' then reboot"
+            echo "  Fix: re-run 'gpu-passthrough setup' then reboot"
           fi
         fi
         echo ""
         echo "To use GPU in VM:"
-        echo "  • Run: ubuntu-gpu-passthrough mode vm"
+        echo "  • Run: gpu-passthrough mode vm"
         ;;
       *)
         # Unknown state (shouldn't happen, but keep old message as fallback)
         msg_warning "Status: Configured (GPU mode: $gpu_mode)"
         echo ""
         echo "Configuration exists. GPU not bound to vfio-pci."
-        echo "   Hint: Use 'ubuntu-gpu-passthrough mode vm' to bind for VM"
-        echo "   Hint: Use 'ubuntu-gpu-passthrough mode host' for host use"
+        echo "   Hint: Use 'gpu-passthrough mode vm' to bind for VM"
+        echo "   Hint: Use 'gpu-passthrough mode host' for host use"
         ;;
       esac
     else
       msg_error "Status: $total_errors issue(s) found"
       echo ""
-      msg_info "Fix issues above and run: ubuntu-gpu-passthrough info verify"
+      msg_info "Fix issues above and run: gpu-passthrough info verify"
     fi
   fi
 
@@ -1110,7 +1110,7 @@ cmd_diagnose() {
       echo '```'
       echo ""
     else
-      echo "GPU passthrough not configured (run: ubuntu-gpu-passthrough setup)"
+      echo "GPU passthrough not configured (run: gpu-passthrough setup)"
       echo ""
     fi
 
@@ -1407,7 +1407,7 @@ cmd_diagnose() {
       # Check if GPU has AMD reset bug
       if gpu_has_reset_bug "$GPU_DEVICE_ID" 2>/dev/null; then
         echo "AMD Reset Bug: ⚠️  This GPU (${GPU_DEVICE_ID}) has known reset issues"
-        echo "  Consider: ubuntu-gpu-passthrough mode persistent enable"
+        echo "  Consider: gpu-passthrough mode persistent enable"
       fi
     else
       echo "GPU Health: N/A (not configured)"
@@ -1808,7 +1808,7 @@ cmd_detect() {
     msg_warning "IOMMU: Not detected"
     echo "  Possible causes:"
     echo "    1. IOMMU not enabled in BIOS (AMD-Vi or Intel VT-d)"
-    echo "    2. Kernel parameters not set → run: ubuntu-gpu-passthrough setup"
+    echo "    2. Kernel parameters not set → run: gpu-passthrough setup"
     echo "    3. Reboot needed after setup"
   fi
 
@@ -1830,9 +1830,9 @@ cmd_status() {
     msg_warning "GPU passthrough not configured"
     echo ""
     echo "Next steps:"
-    echo "   1. ubuntu-gpu-passthrough setup"
+    echo "   1. gpu-passthrough setup"
     echo "   2. Reboot"
-    echo "   3. ubuntu-gpu-passthrough info verify"
+    echo "   3. gpu-passthrough info verify"
     echo ""
     return
   fi
@@ -2517,12 +2517,12 @@ cmd_hardware_report() {
     if [[ "$current_mode" == "vm" ]]; then
       echo "  VM Ready: Yes"
     else
-      echo "  VM Ready: No (run 'ubuntu-gpu-passthrough mode vm')"
+      echo "  VM Ready: No (run 'gpu-passthrough mode vm')"
     fi
   else
     echo "  Current Mode: not configured"
     echo ""
-    echo "  Run: ubuntu-gpu-passthrough setup"
+    echo "  Run: gpu-passthrough setup"
     issues+=("GPU passthrough not configured")
   fi
 

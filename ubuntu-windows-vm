@@ -1490,6 +1490,12 @@ detect_evdev_devices() {
   echo "Detecting input devices for evdev passthrough..."
   echo ""
 
+  # Determine read command — needs access to /dev/input/* (input group or root)
+  local READ_CMD="head -c 1"
+  if [[ ! -r /dev/input/event0 ]] 2>/dev/null; then
+    READ_CMD="sudo head -c 1"
+  fi
+
   local -a kbd_candidates=() mouse_candidates=()
   for dev in /dev/input/by-id/*; do
     [[ -e "$dev" ]] || continue
@@ -1500,61 +1506,72 @@ detect_evdev_devices() {
     [[ "$name" =~ event-mouse ]] && mouse_candidates+=("$dev")
   done
 
-  # --- Keyboard ---
-  echo "Press any key on the keyboard you want to pass through to the VM..."
-  echo "(waiting up to 10 seconds)"
-  echo ""
-  local tmp_kbd
-  tmp_kbd=$(mktemp)
-  local -a pids=()
-  for dev in "${kbd_candidates[@]}"; do
-    ( timeout 10 cat "$dev" > /dev/null 2>&1 && echo "$dev" > "$tmp_kbd" ) &
-    pids+=($!)
-  done
-  local waited=0
-  while [[ -z "$(cat "$tmp_kbd" 2>/dev/null)" ]] && (( waited < 50 )); do
-    sleep 0.2; (( waited++ ))
-  done
-  for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
-  wait "${pids[@]}" 2>/dev/null || true
-  KB_DEVICE=$(cat "$tmp_kbd" 2>/dev/null)
-  rm -f "$tmp_kbd"
-
-  if [[ -z "$KB_DEVICE" ]]; then
-    msg_warning "No keyboard detected — set it manually in the config"
+  if [[ ${#kbd_candidates[@]} -eq 0 ]] && [[ ${#mouse_candidates[@]} -eq 0 ]]; then
+    msg_warning "No input devices found in /dev/input/by-id/ — set devices manually"
+    echo "  Run: ls /dev/input/by-id/"
     KB_DEVICE="YOUR-KEYBOARD-ID"
+    MOUSE_DEVICE="YOUR-MOUSE-ID"
+    return
+  fi
+
+  # Wait for first input on a set of candidates.
+  # Uses 'head -c 1' which exits 0 immediately after reading one byte (unlike
+  # 'cat' which never exits, causing timeout to kill it with exit code 124).
+  _wait_for_input() {
+    local tmp result
+    tmp=$(mktemp)
+    local -a pids=()
+    local dev
+    for dev in "$@"; do
+      ( $READ_CMD "$dev" > /dev/null 2>&1 && echo "$dev" > "$tmp" ) &
+      pids+=($!)
+    done
+    local waited=0
+    while [[ -z "$(cat "$tmp" 2>/dev/null)" ]] && (( waited < 50 )); do
+      sleep 0.2; (( waited++ ))
+    done
+    for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
+    wait "${pids[@]}" 2>/dev/null || true
+    result=$(cat "$tmp" 2>/dev/null)
+    rm -f "$tmp"
+    echo "$result"
+  }
+
+  # --- Keyboard ---
+  if [[ ${#kbd_candidates[@]} -gt 0 ]]; then
+    echo "Press any key on the keyboard you want to pass through to the VM..."
+    echo "(waiting up to 10 seconds)"
+    echo ""
+    KB_DEVICE=$(_wait_for_input "${kbd_candidates[@]}")
+    if [[ -z "$KB_DEVICE" ]]; then
+      msg_warning "No keyboard detected — set it manually in the config"
+      KB_DEVICE="YOUR-KEYBOARD-ID"
+    else
+      msg_success "Keyboard detected: $(basename "$KB_DEVICE")"
+    fi
   else
-    msg_success "Keyboard detected: $(basename "$KB_DEVICE")"
+    msg_warning "No keyboard candidates in /dev/input/by-id/ — set manually"
+    KB_DEVICE="YOUR-KEYBOARD-ID"
   fi
 
   sleep 0.5
   echo ""
 
   # --- Mouse ---
-  echo "Move your mouse or click a button on the mouse you want to pass through..."
-  echo "(waiting up to 10 seconds)"
-  echo ""
-  local tmp_mouse
-  tmp_mouse=$(mktemp)
-  local -a mpids=()
-  for dev in "${mouse_candidates[@]}"; do
-    ( timeout 10 cat "$dev" > /dev/null 2>&1 && echo "$dev" > "$tmp_mouse" ) &
-    mpids+=($!)
-  done
-  waited=0
-  while [[ -z "$(cat "$tmp_mouse" 2>/dev/null)" ]] && (( waited < 50 )); do
-    sleep 0.2; (( waited++ ))
-  done
-  for pid in "${mpids[@]}"; do kill "$pid" 2>/dev/null || true; done
-  wait "${mpids[@]}" 2>/dev/null || true
-  MOUSE_DEVICE=$(cat "$tmp_mouse" 2>/dev/null)
-  rm -f "$tmp_mouse"
-
-  if [[ -z "$MOUSE_DEVICE" ]]; then
-    msg_warning "No mouse detected — set it manually in the config"
-    MOUSE_DEVICE="YOUR-MOUSE-ID"
+  if [[ ${#mouse_candidates[@]} -gt 0 ]]; then
+    echo "Move your mouse or click a button on the mouse you want to pass through..."
+    echo "(waiting up to 10 seconds)"
+    echo ""
+    MOUSE_DEVICE=$(_wait_for_input "${mouse_candidates[@]}")
+    if [[ -z "$MOUSE_DEVICE" ]]; then
+      msg_warning "No mouse detected — set it manually in the config"
+      MOUSE_DEVICE="YOUR-MOUSE-ID"
+    else
+      msg_success "Mouse detected:    $(basename "$MOUSE_DEVICE")"
+    fi
   else
-    msg_success "Mouse detected:    $(basename "$MOUSE_DEVICE")"
+    msg_warning "No mouse candidates in /dev/input/by-id/ — set manually"
+    MOUSE_DEVICE="YOUR-MOUSE-ID"
   fi
 
   echo ""

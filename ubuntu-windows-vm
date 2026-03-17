@@ -951,6 +951,54 @@ function Install-GPUDrivers {
     }
 }
 
+function Install-VirtualDisplayDriver {
+    Write-Log "Installing Virtual Display Driver..." "Cyan"
+    Write-Log "  Enables virtual monitors for full display capabilities" "Gray"
+
+    $VDDZip = "C:\OEM\VirtualDisplayDriver.zip"
+    $VDDDir = "C:\OEM\VDD"
+
+    if (-not (Test-Path $VDDZip)) {
+        Write-Log "  VirtualDisplayDriver.zip not found in C:\OEM\ — skipping" "Yellow"
+        Write-Log "  Download from: https://github.com/VirtualDrivers/Virtual-Display-Driver/releases" "Yellow"
+        return
+    }
+
+    # Extract driver files
+    if (-not (Test-Path $VDDDir)) {
+        try {
+            Expand-Archive -Path $VDDZip -DestinationPath $VDDDir -Force
+        } catch {
+            Write-Log "  Failed to extract VDD: $($_.Exception.Message)" "Red"
+            return
+        }
+    }
+
+    # Find and install the .inf driver file
+    $infFile = Get-ChildItem -Path $VDDDir -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+
+    if (-not $infFile) {
+        Write-Log "  No .inf file found in extracted VDD — install manually from C:\OEM\VDD\" "Yellow"
+        return
+    }
+
+    try {
+        $result = pnputil /add-driver $infFile.FullName /install 2>&1
+        Write-Log "  Driver installed: $($infFile.Name)" "Gray"
+        Write-Log "Virtual Display Driver installed" "Green"
+        Write-Log "" ""
+        Write-Log "  NEXT STEP: After reboot, run VDD Control to add virtual displays:" "Yellow"
+        Write-Log "    1. Extract C:\OEM\VDD.Control.zip" "Yellow"
+        Write-Log "    2. Run VDD Control.exe" "Yellow"
+        Write-Log "    3. Add a virtual display at your desired resolution" "Yellow"
+        Write-Log "    4. Virtual monitors are now available for apps and RDP" "Yellow"
+    } catch {
+        Write-Log "  ERROR installing VDD driver: $($_.Exception.Message)" "Red"
+        Write-Log "  Try manually: pnputil /add-driver $($infFile.FullName) /install" "Yellow"
+    }
+}
+
 function Set-PerformanceMode {
     Write-Log "Applying performance optimizations..." "Cyan"
 
@@ -982,6 +1030,7 @@ Install-LookingGlass
 Install-SpiceGuestTools
 Remove-Bloatware
 Install-GPUDrivers
+Install-VirtualDisplayDriver
 Set-PerformanceMode
 Set-InstallationMarker
 
@@ -1871,6 +1920,8 @@ show_installation_summary() {
     echo "    [OK] Looking Glass host service"
   fi
   echo "    [OK] SPICE Guest Tools"
+  echo "    [OK] GPU drivers (AMD Adrenalin / NVIDIA / Intel Arc via winget)"
+  echo "    [OK] Virtual Display Driver (installed, needs configuration after reboot)"
   echo ""
 
   # Desktop notification
@@ -1882,31 +1933,26 @@ show_installation_summary() {
     echo "  1. Ensure display is connected to GPU (monitor, 2nd cable, or dummy plug)"
     echo "     Note: dummy plugs limit Windows refresh rate"
     echo ""
-    echo "  2. Wait for Windows to install GPU drivers (few minutes)"
+    echo "  2. GPU drivers are auto-installing in Windows now (few minutes)"
     echo "     → Close noVNC browser tab (no longer needed)"
+    echo "     Screen may FREEZE during driver install — this is normal"
+    echo "     If frozen: windows-vm stop && windows-vm launch --lg"
     echo ""
-    echo "  3. Device Manager → Disable 'Red Hat VirtIO GPU DOD controller'"
-    echo "     WARNING: Screen will FREEZE after this - this is normal!"
+    echo "  3. Enable Virtual Display Driver (for full display capabilities):"
+    echo "     → Connect via RDP: windows-vm launch"
+    echo "     → Extract C:\\OEM\\VDD.Control.zip and run VDD Control.exe"
+    echo "     → Add a virtual display at your desired resolution"
+    echo "     → Reboot Windows: windows-vm stop && windows-vm launch --lg"
     echo ""
-    echo "  4. Immediately restart the VM:"
-    echo "     → windows-vm stop"
-    echo "     → windows-vm launch --lg --keep-alive --windowed"
-    echo ""
-    echo "  5. After restart, wait for Windows to configure the GPU display"
-    echo "     → Looking Glass will show native GPU output"
-    echo ""
-    echo "  6. Optional: Set resolution and refresh rate in Windows Display Settings"
-    echo ""
-    echo "  7. Install GPU drivers (NVIDIA/AMD) for best performance"
-    echo "     Screen may FREEZE during install - restart VM as in step 4"
-    echo "     Tip: RDP works even when LG freezes (windows-vm launch)"
+    echo "  4. Device Manager → Disable 'Red Hat VirtIO GPU DOD controller'"
+    echo "     WARNING: Screen will FREEZE after this — this is normal!"
+    echo "     Immediately restart: windows-vm stop && windows-vm launch --lg"
     echo ""
     echo "Done! You now have full GPU performance in Looking Glass."
     echo "     Now you can update Windows, install games and apps."
     echo ""
     echo "If Looking Glass doesn't start automatically:"
     echo "  → windows-vm launch --lg --keep-alive"
-    echo "  → or use app menu: 'Windows [Looking Glass]'"
     echo ""
   fi
 }
@@ -3351,6 +3397,26 @@ install_windows() {
       echo "   Download manually: https://looking-glass.io/downloads"
       echo "   Save to: $OEM_DIR/looking-glass-host-setup.exe"
     fi
+  fi
+
+  # Download Virtual Display Driver (creates virtual monitors for RDP/remote sessions)
+  VDD_ZIP="$OEM_DIR/VirtualDisplayDriver.zip"
+  VDD_CONTROL_ZIP="$OEM_DIR/VDD.Control.zip"
+  VDD_VERSION="25.7.23"
+  if [[ ! -f "$VDD_ZIP" ]]; then
+    msg_info "Downloading Virtual Display Driver $VDD_VERSION..."
+    if ! curl -L --max-time 300 --connect-timeout 30 \
+      -o "$VDD_ZIP" \
+      "https://github.com/VirtualDrivers/Virtual-Display-Driver/releases/download/${VDD_VERSION}/VirtualDisplayDriver-x86.Driver.Only.zip" 2>/dev/null; then
+      msg_warning "Virtual Display Driver download failed"
+      echo "   Download manually: https://github.com/VirtualDrivers/Virtual-Display-Driver/releases/tag/${VDD_VERSION}"
+      echo "   Save to: $OEM_DIR/VirtualDisplayDriver.zip"
+    fi
+  fi
+  if [[ ! -f "$VDD_CONTROL_ZIP" ]]; then
+    curl -L --max-time 60 --connect-timeout 30 \
+      -o "$VDD_CONTROL_ZIP" \
+      "https://github.com/VirtualDrivers/Virtual-Display-Driver/releases/download/${VDD_VERSION}/VDD.Control.${VDD_VERSION}.zip" 2>/dev/null || true
   fi
 
   SPICE_INSTALLER="$OEM_DIR/spice-guest-tools-setup.exe"

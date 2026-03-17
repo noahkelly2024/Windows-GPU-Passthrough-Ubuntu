@@ -2655,7 +2655,15 @@ install_windows() {
   # Get system resources
   TOTAL_RAM=$(free -h | awk 'NR==2 {print $2}')
   TOTAL_RAM_GB=$(awk 'NR==1 {printf "%d", $2/1024/1024}' /proc/meminfo)
-  TOTAL_CORES=$(nproc)
+  # Use physical cores, not threads (nproc returns threads on HT/SMT systems)
+  local _cores_per_socket _sockets
+  _cores_per_socket=$(lscpu 2>/dev/null | awk -F: '/^Core\(s\) per socket/{gsub(/ /,"",$2); print $2}')
+  _sockets=$(lscpu 2>/dev/null | awk -F: '/^Socket\(s\)/{gsub(/ /,"",$2); print $2}')
+  if [[ "$_cores_per_socket" =~ ^[0-9]+$ ]] && [[ "$_sockets" =~ ^[0-9]+$ ]]; then
+    TOTAL_CORES=$(( _cores_per_socket * _sockets ))
+  else
+    TOTAL_CORES=$(nproc)
+  fi
 
   # Validate RAM detection (must be positive number)
   if ! [[ "$TOTAL_RAM_GB" =~ ^[0-9]+$ ]] || [[ "$TOTAL_RAM_GB" -eq 0 ]]; then
@@ -2725,15 +2733,52 @@ install_windows() {
 
   msg_success "RAM: $SELECTED_RAM"
 
-  # Use previous CPU cores if available, otherwise calculate intelligent default (quarter of total)
+  # Detect P-core count on hybrid CPUs (Intel 12th gen+) for accurate prompt
+  local P_CORES=0
+  local total_threads_all
+  total_threads_all=$(nproc --all 2>/dev/null || echo 0)
+  if [[ "$total_threads_all" -gt 0 ]]; then
+    local -A _freq_seen=()
+    local -a _unique_freqs=()
+    local _lowest_freq=""
+    for (( _cpu=0; _cpu<total_threads_all; _cpu++ )); do
+      local _ffile="/sys/devices/system/cpu/cpu${_cpu}/cpufreq/cpuinfo_max_freq"
+      [[ -r "$_ffile" ]] || continue
+      local _f=$(<"$_ffile")
+      [[ "$_f" =~ ^[0-9]+$ ]] || continue
+      [[ -z "${_freq_seen[$_f]:-}" ]] && { _freq_seen[$_f]=1; _unique_freqs+=("$_f"); }
+    done
+    if [[ ${#_unique_freqs[@]} -gt 1 ]]; then
+      _lowest_freq=$(printf '%s\n' "${_unique_freqs[@]}" | sort -n | head -1)
+      local _pcpu_threads=0
+      for (( _cpu=0; _cpu<total_threads_all; _cpu++ )); do
+        local _ffile="/sys/devices/system/cpu/cpu${_cpu}/cpufreq/cpuinfo_max_freq"
+        [[ -r "$_ffile" ]] || continue
+        local _f=$(<"$_ffile")
+        [[ "$_f" != "$_lowest_freq" ]] && (( _pcpu_threads++ ))
+      done
+      local _host_tpc
+      _host_tpc=$(lscpu 2>/dev/null | awk -F: '/^Thread\(s\) per core/{gsub(/ /,"",$2); print $2}')
+      [[ "$_host_tpc" =~ ^[0-9]+$ ]] && [[ "$_host_tpc" -gt 0 ]] || _host_tpc=1
+      P_CORES=$(( _pcpu_threads / _host_tpc ))
+    fi
+  fi
+
+  # Use previous CPU cores if available, otherwise calculate intelligent default (quarter of P-cores)
+  local CORE_HINT=""
+  if [[ "$P_CORES" -gt 0 ]] && [[ "$P_CORES" -lt "$TOTAL_CORES" ]]; then
+    local E_CORES=$(( TOTAL_CORES - P_CORES ))
+    CORE_HINT=" — recommended max: $P_CORES (${P_CORES} P-cores + ${E_CORES} E-cores, VM prefers P-cores)"
+  fi
+
   if [[ -n "$PREVIOUS_CPU" ]]; then
     DEFAULT_CORES="$PREVIOUS_CPU"
   else
-    # Calculate quarter of total cores (conservative: leave more for host)
-    DEFAULT_CORES=$((TOTAL_CORES / 4))
+    local DEFAULT_BASE=$(( P_CORES > 0 ? P_CORES : TOTAL_CORES ))
+    DEFAULT_CORES=$(( DEFAULT_BASE / 4 ))
     [[ "$DEFAULT_CORES" -lt 1 ]] && DEFAULT_CORES=1
   fi
-  echo "How many CPU cores would you like to allocate to Windows VM? (1-$TOTAL_CORES, default: $DEFAULT_CORES)"
+  echo "How many CPU cores would you like to allocate to Windows VM? (1-${TOTAL_CORES}${CORE_HINT}, default: $DEFAULT_CORES)"
   read -r -p "Number of CPU cores: " SELECTED_CORES
   if [[ -z "$SELECTED_CORES" ]]; then
     SELECTED_CORES="$DEFAULT_CORES"
@@ -3241,7 +3286,15 @@ install_windows() {
   LG_INSTALLER="$OEM_DIR/looking-glass-host-setup.exe"
 
   if [[ ! -f "$LG_INSTALLER" ]]; then
-    if curl -L --max-time 300 --connect-timeout 30 -o "$LG_ZIP" "https://looking-glass.io/artifact/stable/host" 2>/dev/null; then
+    # Detect installed client version so host matches exactly (B6, B7, etc.)
+    local LG_VERSION="stable"
+    local lg_ver_raw
+    lg_ver_raw=$(looking-glass-client --version 2>/dev/null | grep -oP 'Looking Glass \(\K[^)]+' | head -1)
+    if [[ -n "$lg_ver_raw" ]]; then
+      LG_VERSION="$lg_ver_raw"
+      msg_info "Downloading Looking Glass host $LG_VERSION (matching installed client)"
+    fi
+    if curl -L --max-time 300 --connect-timeout 30 -o "$LG_ZIP" "https://looking-glass.io/artifact/${LG_VERSION}/host" 2>/dev/null; then
       if unzip -q -o "$LG_ZIP" -d "$OEM_DIR" 2>/dev/null; then
         rm "$LG_ZIP"
       else

@@ -6,6 +6,7 @@ ORIGINAL_SCRIPT_ARGS=("$@")
 
 SPICE_DIR="/var/run/ubuntu-windows"
 SPICE_SOCKET_PATH="$SPICE_DIR/spice.sock"
+LG_VERSION="B7"
 
 # Source shared utilities if available
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -168,7 +169,6 @@ install_kvmfr_ubuntu() {
 
   # Build from Looking Glass source
   # The kvmfr DKMS module ships with Looking Glass. Download and build it.
-  local LG_VERSION="B7"
   local BUILD_DIR
   BUILD_DIR=$(mktemp -d /tmp/looking-glass-build.XXXXXX)
   trap 'rm -rf "$BUILD_DIR"' RETURN
@@ -213,42 +213,81 @@ install_kvmfr_ubuntu() {
   fi
 }
 
-# ── looking-glass-client installation (Ubuntu) ───────────────────────────────
+# ── looking-glass-client installation (build from source) ────────────────────
 
 install_looking_glass_client_binary() {
-  if command -v looking-glass-client &>/dev/null; then
-    msg_success "looking-glass-client already installed"
+  # Check if already at the target version (built-from-source install at /usr/local/bin)
+  if [[ -f /usr/local/bin/looking-glass-client ]]; then
+    msg_success "looking-glass-client $LG_VERSION already installed"
     return 0
   fi
 
-  msg_info "Installing looking-glass-client..."
+  # If apt B6 is installed we will remove it after a successful build
+  local apt_installed=false
+  dpkg -l looking-glass-client 2>/dev/null | grep -q "^ii" && apt_installed=true
 
-  # Try snap
-  if command -v snap &>/dev/null; then
-    if sudo snap install looking-glass-client 2>/dev/null; then
-      # snap installs to /snap/bin — ensure it's in PATH
-      export PATH="/snap/bin:$PATH"
-      if command -v looking-glass-client &>/dev/null; then
-        msg_success "looking-glass-client installed via snap"
-        return 0
-      fi
-    fi
+  msg_info "Building looking-glass-client $LG_VERSION from source..."
+
+  # Build dependencies (from official docs)
+  local build_deps=(
+    binutils-dev cmake fonts-dejavu-core libfontconfig-dev
+    gcc g++ pkg-config libegl-dev libgl-dev libgles-dev libspice-protocol-dev
+    nettle-dev libgmp-dev
+    libx11-dev libxcursor-dev libxi-dev libxinerama-dev
+    libxpresent-dev libxss-dev libxfixes-dev
+    libxkbcommon-dev libwayland-dev wayland-protocols libwayland-bin
+    libpipewire-0.3-dev libpulse-dev libsamplerate0-dev
+  )
+  msg_info "Installing build dependencies..."
+  sudo apt-get install -y "${build_deps[@]}" 2>&1 | grep -E '(Setting up|already installed|E:)' || true
+
+  local BUILD_DIR
+  BUILD_DIR=$(mktemp -d /tmp/lg-client-build.XXXXXX)
+  # shellcheck disable=SC2064
+  trap "rm -rf '$BUILD_DIR'" RETURN
+
+  local TARBALL="$BUILD_DIR/source.tar.gz"
+  msg_info "Downloading Looking Glass $LG_VERSION source..."
+  if ! curl -fL "https://looking-glass.io/artifact/$LG_VERSION/source" -o "$TARBALL"; then
+    msg_error "Failed to download Looking Glass $LG_VERSION source"
+    return 1
   fi
 
-  # Try apt (available in some Ubuntu releases/PPAs)
-  if sudo apt-get install -y looking-glass-client 2>/dev/null; then
-    msg_success "looking-glass-client installed via apt"
-    return 0
+  tar -xzf "$TARBALL" -C "$BUILD_DIR" || {
+    msg_error "Failed to extract source"
+    return 1
+  }
+
+  # Find client CMakeLists.txt directly (avoids assumptions about dir name)
+  local CLIENT_DIR
+  CLIENT_DIR=$(dirname "$(find "$BUILD_DIR" -maxdepth 3 -name "CMakeLists.txt" -path "*/client/CMakeLists.txt" | head -1)")
+  if [[ -z "$CLIENT_DIR" || "$CLIENT_DIR" == "." ]]; then
+    msg_error "Could not find client/CMakeLists.txt in source"
+    ls "$BUILD_DIR"/ >&2
+    return 1
   fi
 
-  msg_error "Could not install looking-glass-client automatically"
-  echo ""
-  echo "   Install it manually, then re-run this script."
-  echo "   Options:"
-  echo "     snap install looking-glass-client"
-  echo "     Or build from source: https://looking-glass.io/docs/B7/install/"
-  echo ""
-  return 1
+  msg_info "Building (this may take a few minutes)..."
+  local CLIENT_BUILD="$CLIENT_DIR/build"
+  mkdir -p "$CLIENT_BUILD"
+  if ! cmake -S "$CLIENT_DIR" -B "$CLIENT_BUILD" -DENABLE_BACKTRACE=0 >/dev/null 2>&1; then
+    msg_error "cmake configuration failed"
+    cmake -S "$CLIENT_DIR" -B "$CLIENT_BUILD" -DENABLE_BACKTRACE=0 2>&1 | tail -20
+    return 1
+  fi
+  if ! cmake --build "$CLIENT_BUILD" -j"$(nproc)" 2>&1 | tail -5; then
+    msg_error "Build failed"
+    return 1
+  fi
+
+  # Remove apt B6 package if it was installed (avoids two looking-glass-clients in PATH)
+  if [[ "$apt_installed" == true ]]; then
+    msg_info "Removing apt-installed looking-glass-client (B6)..."
+    sudo apt-get remove -y looking-glass-client 2>/dev/null || true
+  fi
+
+  sudo install -m 755 "$CLIENT_BUILD/looking-glass-client" /usr/local/bin/looking-glass-client
+  msg_success "looking-glass-client $LG_VERSION installed to /usr/local/bin/"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

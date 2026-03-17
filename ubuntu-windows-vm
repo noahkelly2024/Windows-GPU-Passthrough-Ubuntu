@@ -1652,7 +1652,7 @@ create_docker_compose_config() {
     # Looking Glass only (no GPU passthrough)
     local _lg_disk_fallback=""
     [[ -z "$DISK_FLAGS" ]] && _lg_disk_fallback="-global scsi-hd.vendor=ATA "
-    local LG_ARGS="$MACHINE_FLAGS $CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS -vga none ${_lg_disk_fallback}-device ivshmem-plain,id=shmem0,memdev=looking-glass -object memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=${IVSHMEM_SIZE}M,share=yes"
+    local LG_ARGS="$MACHINE_FLAGS $CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS ${_lg_disk_fallback}-device ivshmem-plain,id=shmem0,memdev=looking-glass -object memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=${IVSHMEM_SIZE}M,share=yes"
     LG_ARGS="${LG_ARGS# }" # Trim leading space
     ARGUMENTS_SECTION="
       ARGUMENTS: \"$LG_ARGS\""
@@ -1661,7 +1661,7 @@ create_docker_compose_config() {
     if [[ -n "$MACHINE_FLAGS" ]] || [[ "$CPU_FLAGS" != "-cpu host" ]] || [[ -n "$SMBIOS_FLAGS" ]] || [[ -n "$DISK_FLAGS" ]] || [[ -n "$SMP_FLAGS" ]]; then
       local _cpu_disk_fallback=""
       [[ -z "$DISK_FLAGS" ]] && _cpu_disk_fallback=" -global scsi-hd.vendor=ATA"
-      local CPU_ARGS="$MACHINE_FLAGS $CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS -vga none${_cpu_disk_fallback}"
+      local CPU_ARGS="$MACHINE_FLAGS $CPU_FLAGS $SMP_FLAGS $SMBIOS_FLAGS $DISK_FLAGS${_cpu_disk_fallback}"
       CPU_ARGS="${CPU_ARGS# }" # Trim leading space
       ARGUMENTS_SECTION="
       ARGUMENTS: \"$CPU_ARGS\""

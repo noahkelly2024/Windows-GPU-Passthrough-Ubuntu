@@ -2909,8 +2909,10 @@ install_windows() {
     local size_gb
     size_gb=$(df -BG "$mp" 2>/dev/null | awk 'NR==2{gsub(/G/,"",$4); print int($4)}')
     [[ "$size_gb" -lt 5 ]] 2>/dev/null && continue
+    local display_mp="$mp"
+    [[ "$mp" == "/" ]] && display_mp="$HOME  (root filesystem)"
     drive_mounts+=("$mp")
-    drive_labels+=("$mp  ($size, $(df -BG "$mp" 2>/dev/null | awk 'NR==2{gsub(/G/,"",$4); print $4}')G free)")
+    drive_labels+=("$display_mp  ($size, $(df -BG "$mp" 2>/dev/null | awk 'NR==2{gsub(/G/,"",$4); print $4}')G free)")
   done < <(df -h --output=target,size,fstype 2>/dev/null | tail -n +2 | sort -u)
 
   echo "  Select a drive to store the VM disk (windows-vm/ folder will be created):"
@@ -2940,7 +2942,11 @@ install_windows() {
     done
   elif [[ "$STORAGE_CHOICE_IDX" =~ ^[0-9]+$ ]] && [[ "$STORAGE_CHOICE_IDX" -ge 1 ]] && [[ "$STORAGE_CHOICE_IDX" -le "${#drive_mounts[@]}" ]]; then
     local selected_mount="${drive_mounts[$((STORAGE_CHOICE_IDX-1))]}"
-    WINDOWS_STORAGE_DIR="${selected_mount%/}/windows-vm"
+    if [[ "$selected_mount" == "/" ]]; then
+      WINDOWS_STORAGE_DIR="$HOME/windows-vm"
+    else
+      WINDOWS_STORAGE_DIR="${selected_mount%/}/windows-vm"
+    fi
   else
     msg_warning "Invalid selection — using default"
     WINDOWS_STORAGE_DIR="$HOME/.windows"
